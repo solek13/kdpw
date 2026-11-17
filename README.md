@@ -21,15 +21,34 @@ Pliki wydań i kolejne wersje są dostępne w [GitHub Releases](https://github.c
 Polecenie `python -m pykdpw` wykonuje te same operacje co `pykdpw`.
 Do pobierania danych nie potrzeba konta KDPW ani klucza API.
 
-Domyślny katalog danych to `./data`, względem bieżącego katalogu procesu.
-Przy regularnym uruchamianiu wskazuj **ten sam bezwzględny katalog**:
+## Wybór katalogu danych
 
-```shell
-pykdpw fetch --data-dir /pelna/sciezka/do/danych
+Opcja `--data-dir` pozwala wskazać własną ścieżkę. W tym katalogu program zapisuje
+bazę `rze.sqlite3`, dzienne archiwa ZIP i stan ograniczeń pobierania.
+Bez tej opcji używa `./data`, względem bieżącego katalogu procesu.
+
+Windows (PowerShell):
+
+```powershell
+pykdpw fetch --data-dir "D:\Dane\KDPW"
+pykdpw nominal --data-dir "D:\Dane\KDPW"
+pykdpw status --data-dir "D:\Dane\KDPW"
 ```
 
-Na Windows użyj swojej ścieżki, np. `C:\dane\rze`. Zawsze wskazuj ten sam katalog
-również w poleceniach `status`, `nominal` i `import`.
+Linux:
+
+```shell
+pykdpw fetch --data-dir "/pelna/sciezka/do/danych"
+pykdpw nominal --data-dir "/pelna/sciezka/do/danych"
+pykdpw status --data-dir "/pelna/sciezka/do/danych"
+```
+
+Zastąp przykładową ścieżkę własną. Cudzysłowy pozwalają używać ścieżek ze spacjami.
+Przy codziennym uruchamianiu i we wszystkich poleceniach wskazuj **ten sam
+bezwzględny katalog**, aby zachować historię oraz dzienny limit pobierania.
+Opcja działa również z `import` i `resume`.
+
+## Polecenia
 
 | Polecenie | Działanie |
 | --- | --- |
@@ -60,6 +79,9 @@ print(collector.status())
 report = nominal_report(data_dir)
 print(report["by_currency"])
 ```
+
+W Pythonie katalog wybierasz przez `data_dir`, np. `Path(r"D:\Dane\KDPW")`
+na Windows lub `Path("/pelna/sciezka/do/danych")` na Linuksie.
 
 `Collector.import_local(Path("raport.zip"))` importuje posiadany plik bez internetu.
 `nominal_report(data_dir, run_id=1)` odczytuje wybraną obserwację historyczną.
