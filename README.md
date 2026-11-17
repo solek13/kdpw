@@ -31,6 +31,7 @@ Przy regularnym uruchamianiu wskazuj **ten sam bezwzględny katalog**:
 | `fetch` | Jedna próba pobrania eksportu i import do SQLite |
 | `import PLIK.zip` | Zapis i import lokalnego archiwum, bez dostępu do internetu |
 | `status` | Ostatnia próba, ostatni udany import, daty raportu, liczebności i blokady |
+| `nominal [--run-id ID]` | Lokalna suma podanego nominału aktywnych obligacji według walut i raport braków |
 | `resume` | Usunięcie wstrzymania po HTTP 401/403 po ręcznym sprawdzeniu przyczyny |
 
 Każde polecenie przyjmuje `--data-dir`. Wynik jest JSON-em na standardowym wyjściu,
@@ -78,6 +79,34 @@ To konserwatywna polityka tego programu, **nie limit ogłoszony przez KDPW**.
 Nie gwarantuje braku blokady. Używaj jednego katalogu danych i jednej instalacji
 pobierającej; inne katalogi/maszyny nie współdzielą limitu. Nie usuwaj bazy,
 aby wymuszać kolejne próby. Program nie stosuje rotacji adresów ani obchodzenia zabezpieczeń.
+
+## Nominał aktywnych obligacji
+
+```powershell
+.\.venv\Scripts\python.exe -m kdpw_rze nominal
+.\.venv\Scripts\python.exe -m kdpw_rze nominal --run-id 1
+```
+
+Raport działa wyłącznie na lokalnej bazie. Domyślnie wybiera ostatnią udaną
+obserwację; `--run-id` wybiera konkretny zapis historyczny. Sumuje `NmnlVal`
+dla obligacji `BOND` ze statusem `ACTV`, osobno dla każdej waluty, używając
+`Decimal`. Jest to **suma podanego nominału aktywnych wpisów w RZE**.
+`NmnlVal` to wartość nominalna długu całej emisji — nie mnożymy jej ponownie
+przez `Qty`, nie dodajemy odsetek ani kwot z kalendariów świadczeń.
+Nie wykluczamy emisji wyłącznie dlatego, że minęła data zapadalności.
+
+Wynik zawiera datę obserwacji i datę danych KDPW, kwoty `by_currency`, liczbę
+uwzględnionych rekordów i `quality`: braki nominału lub waluty, niepoprawne kwoty,
+nieznane statusy oraz powtarzające się identyfikatory instrumentu przy tych samych
+opublikowanych danych identyfikacyjnych emitenta. Nie ma automatycznego usuwania
+takich duplikatów ani zastępowania braków zerem. Status `partial` oznacza, że
+sumy są obliczone dla dostępnych poprawnych wartości i wymagają uwzględnienia
+raportu jakości; samo wyliczenie raportu nadal kończy się kodem `0`.
+
+`NACT` jest wykluczony z sumy także wtedy, gdy źródło nadal zawiera dodatni nominał;
+liczba takich wpisów jest pokazywana oddzielnie. To nie jest wycena rynkowa ani
+pełna statystyka wszystkich obligacji w Polsce. Jedna suma w PLN wymaga
+osobnego wyboru źródła i daty kursów walutowych. Polecenie nie pobiera kursów.
 
 ## Archiwum i historia
 

@@ -16,6 +16,7 @@ from defusedxml.common import DefusedXmlException
 from . import __version__
 from .collector import Collector
 from .common import CollectorError
+from .nominal import nominal_report
 
 
 def main(argv=None) -> int:
@@ -30,12 +31,15 @@ def main(argv=None) -> int:
         ("fetch", "Pobierz eksport: maksymalnie jedna próba na dzień."),
         ("import", "Importuj lokalny ZIP bez internetu."),
         ("status", "Pokaż stan pobierania, ostatni raport i błędy."),
+        ("nominal", "Zsumuj podany nominał aktywnych obligacji według walut, lokalnie."),
         ("resume", "Usuń ręczne wstrzymanie po HTTP 401/403; zachowaj limity."),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("--data-dir", type=Path, default=argparse.SUPPRESS)
         if name == "import":
             command.add_argument("archive", type=Path)
+        elif name == "nominal":
+            command.add_argument("--run-id", type=int, help="Wybrana obserwacja; domyślnie ostatnia udana.")
     args = parser.parse_args(argv)
     collector = Collector(args.data_dir, progress=lambda message: print(message, file=sys.stderr, flush=True))
     try:
@@ -45,6 +49,8 @@ def main(argv=None) -> int:
             result = collector.import_local(args.archive)
         elif args.command == "resume":
             result = collector.resume()
+        elif args.command == "nominal":
+            result = nominal_report(args.data_dir, args.run_id)
         else:
             result = collector.status()
         print(json.dumps(result, ensure_ascii=False, indent=2))
