@@ -37,6 +37,7 @@ def check_members(names: list[str]):
     for name in names:
         parts = Path(name).parts
         assert not {"data", ".venv", ".git", "__pycache__"}.intersection(parts), name
+        assert "kdpw_rze" not in parts, name
         assert not name.endswith((".sqlite3", ".sqlite3-wal", ".zip", ".log", ".pyc")), name
 
 
@@ -50,11 +51,11 @@ def check_distribution(dist_dir: Path):
         check_members(names)
         metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
         metadata = email.message_from_bytes(archive.read(metadata_name))
-        assert metadata["Name"] == "kdpw-rze"
+        assert metadata["Name"] == "pykdpw"
         assert metadata["License-Expression"] == "MIT"
         assert metadata["Requires-Python"] == ">=3.12"
         assert any(name.endswith("/licenses/LICENSE") for name in names)
-        assert "kdpw_rze/nominal.py" in names
+        assert "pykdpw/nominal.py" in names
         version = metadata["Version"]
     with tarfile.open(sdists[0]) as archive:
         names = archive.getnames()
@@ -64,14 +65,14 @@ def check_distribution(dist_dir: Path):
             assert any(name.endswith("/" + required) for name in names), required
 
     # TemporaryDirectory owns exactly the generated directory under the system temp root.
-    with tempfile.TemporaryDirectory(prefix="kdpw-rze-package-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="pykdpw-package-") as temporary:
         root = Path(temporary).resolve()
         assert root.parent == Path(tempfile.gettempdir()).resolve()
         environment = root / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
         scripts = environment / ("Scripts" if os.name == "nt" else "bin")
         python = scripts / ("python.exe" if os.name == "nt" else "python")
-        command = scripts / ("kdpw-rze.exe" if os.name == "nt" else "kdpw-rze")
+        command = scripts / ("pykdpw.exe" if os.name == "nt" else "pykdpw")
         subprocess.run([str(python), "-m", "pip", "install", str(wheel)], cwd=root, check=True)
 
         def run(*args):
@@ -94,12 +95,12 @@ def check_distribution(dist_dir: Path):
         assert nominal["by_currency"] == [
             {"currency": "PLN", "nominal_amount": "123.45", "included_records": 1}
         ]
-        api = """import json, pathlib, kdpw_rze
-from kdpw_rze import Collector, CollectorError, nominal_report
+        api = """import json, pathlib, pykdpw
+from pykdpw import Collector, CollectorError, nominal_report
 assert nominal_report(pathlib.Path('data'))['included_records'] == 1
 assert Collector(pathlib.Path('data')).status()['last_successful_run']['status'] == 'complete'
 assert issubclass(CollectorError, Exception)
-print(json.dumps({'module': kdpw_rze.__file__}))
+print(json.dumps({'module': pykdpw.__file__}))
 """
         result = subprocess.run([str(python), "-I", "-c", api], cwd=root, check=True,
                                 capture_output=True, text=True, encoding="utf-8")

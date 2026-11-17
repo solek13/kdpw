@@ -6,7 +6,7 @@ from xml.sax.saxutils import escape
 
 import pytest
 
-from kdpw_rze.xml_reader import NAMESPACE
+from pykdpw.xml_reader import NAMESPACE
 
 
 @pytest.fixture

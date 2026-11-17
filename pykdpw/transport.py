@@ -11,7 +11,7 @@ from .common import CollectorError
 from .xml_reader import MAX_ZIP_BYTES
 
 EXPORT_URL = "https://data.kdpw.pl/oth/rze/info/api/file/getxml"
-USER_AGENT = f"kdpw-rze/{__version__} (+https://github.com/solek13/kdpw)"
+USER_AGENT = f"pykdpw/{__version__} (+https://github.com/solek13/kdpw)"
 SOCKET_TIMEOUT = 60
 TOTAL_TIMEOUT = 300
 

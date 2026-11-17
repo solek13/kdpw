@@ -1,8 +1,8 @@
-# Wydania kdpw-rze
+# Wydania pykdpw
 
-Paczka: `kdpw-rze`. Import: `kdpw_rze`. Komenda: `kdpw-rze`.
-Jedynym źródłem numeru wersji jest `kdpw_rze/__init__.py`.
-Tag wydania ma postać `v0.1.0` i musi odpowiadać wersji w kodzie.
+Paczka: `pykdpw`. Import: `pykdpw`. Komenda: `pykdpw`.
+Jedynym źródłem numeru wersji jest `pykdpw/__init__.py`.
+Tag wydania ma postać `v0.2.0` i musi odpowiadać wersji w kodzie.
 
 ## Kontrola przed wydaniem
 
@@ -22,8 +22,8 @@ Skrypt sprawdza metadane i zawartość obu plików, instaluje wheel w nowym venv
 repozytorium, uruchamia CLI i Python API oraz importuje syntetyczny raport.
 Nie pobiera danych z KDPW. Instalacja zależności wymaga dostępu do PyPI.
 
-Do wydania dołączamy tylko `kdpw_rze-VERSION-py3-none-any.whl` i
-`kdpw_rze-VERSION.tar.gz`, bez baz, ZIP-ów KDPW, konfiguracji kont czy logów.
+Do wydania dołączamy tylko `pykdpw-VERSION-py3-none-any.whl` i
+`pykdpw-VERSION.tar.gz`, bez baz, ZIP-ów KDPW, konfiguracji kont czy logów.
 
 ## GitHub Releases
 
@@ -35,7 +35,7 @@ pod tym samym numerem wersji.
 Publiczny wheel można instalować bez konta GitHub i bez programu Git:
 
 ```shell
-python -m pip install "https://github.com/solek13/kdpw/releases/download/v0.1.0/kdpw_rze-0.1.0-py3-none-any.whl"
+python -m pip install "https://github.com/solek13/kdpw/releases/download/v0.2.0/pykdpw-0.2.0-py3-none-any.whl"
 ```
 
 ## Jednorazowe powiązanie PyPI
@@ -50,7 +50,7 @@ Dla projektu, który jeszcze nie istnieje, wybierz „pending publisher”:
 
 | Pole | Wartość |
 | --- | --- |
-| PyPI project name | `kdpw-rze` |
+| PyPI project name | `pykdpw` |
 | Owner | `solek13` |
 | Repository name | `kdpw` |
 | Workflow name | `publish.yml` |
@@ -65,11 +65,11 @@ dane w ustawieniach Trusted Publishers tego projektu.
 
 Po skonfigurowaniu publishera otwórz workflow
 [Publish to PyPI](https://github.com/solek13/kdpw/actions/workflows/publish.yml),
-wybierz **Run workflow** i podaj istniejący tag, np. `v0.1.0`.
+wybierz **Run workflow** i podaj istniejący tag, np. `v0.2.0`.
 Można również użyć GitHub CLI:
 
 ```shell
-gh workflow run publish.yml --repo solek13/kdpw -f tag=v0.1.0
+gh workflow run publish.yml --repo solek13/kdpw -f tag=v0.2.0
 ```
 
 Workflow testuje kod z tego tagu, sprawdza zgodność numeru wersji, buduje paczki,
@@ -80,9 +80,9 @@ Uruchomienie workflow bez powiązania PyPI zakończy się odmową publikacji.
 Po pierwszej udanej publikacji dostępna będzie krótka instalacja:
 
 ```shell
-python -m pip install kdpw-rze
-kdpw-rze fetch
+python -m pip install pykdpw
+pykdpw fetch
 ```
 
-Zweryfikuj stronę `https://pypi.org/project/kdpw-rze/` i instalację w świeżym venv.
+Zweryfikuj stronę `https://pypi.org/project/pykdpw/` i instalację w świeżym venv.
 Nie publikuj ponownie zmienionych plików pod istniejącą wersją; wydaj nową wersję.

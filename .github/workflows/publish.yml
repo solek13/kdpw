@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag matching the package version (for example v0.1.0)
+        description: Existing release tag matching the package version (for example v0.2.0)
         required: true
         type: string
 
@@ -33,7 +33,7 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          from kdpw_rze import __version__
+          from pykdpw import __version__
           assert os.environ['RELEASE_TAG'] == f'v{__version__}', 'Tag must match package version'
           PY
       - run: python -m pytest -q
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/kdpw-rze/
+      url: https://pypi.org/project/pykdpw/
     permissions:
       id-token: write
     steps:

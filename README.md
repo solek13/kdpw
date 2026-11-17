@@ -1,4 +1,4 @@
-# KDPW RZE — archiwum obligacji
+# pykdpw — dane obligacji z KDPW RZE
 
 Niezależna paczka Python do pobierania publicznego eksportu Rejestru Zobowiązań Emitentów KDPW.
 Każde uruchomienie `fetch` próbuje pobrać jeden ZIP z XML-em, zachowuje oryginał
@@ -8,24 +8,24 @@ Program przeznaczony jest do uruchamiania raz dziennie. Nie instaluje harmonogra
 ## Instalacja i uruchomienie
 
 Python **3.12 lub nowszy**, Windows lub Linux. W aktywnym środowisku Pythona
-zainstaluj gotowe wydanie (bez klonowania repozytorium i bez Git):
+zainstaluj paczkę i pobierz dane:
 
 ```shell
-python -m pip install "https://github.com/solek13/kdpw/releases/download/v0.1.0/kdpw_rze-0.1.0-py3-none-any.whl"
-kdpw-rze fetch
-kdpw-rze nominal
-kdpw-rze status
+python -m pip install pykdpw
+pykdpw fetch
+pykdpw nominal
+pykdpw status
 ```
 
 Pliki wydań i kolejne wersje są dostępne w [GitHub Releases](https://github.com/solek13/kdpw/releases).
-Polecenie `python -m kdpw_rze` wykonuje te same operacje co `kdpw-rze`.
+Polecenie `python -m pykdpw` wykonuje te same operacje co `pykdpw`.
 Do pobierania danych nie potrzeba konta KDPW ani klucza API.
 
 Domyślny katalog danych to `./data`, względem bieżącego katalogu procesu.
 Przy regularnym uruchamianiu wskazuj **ten sam bezwzględny katalog**:
 
 ```shell
-kdpw-rze fetch --data-dir /pelna/sciezka/do/danych
+pykdpw fetch --data-dir /pelna/sciezka/do/danych
 ```
 
 Na Windows użyj swojej ścieżki, np. `C:\dane\rze`. Zawsze wskazuj ten sam katalog
@@ -48,7 +48,7 @@ Kody zakończenia: `0` sukces lub wykorzystana już dzienna próba, `1` błąd,
 
 ```python
 from pathlib import Path
-from kdpw_rze import Collector, nominal_report
+from pykdpw import Collector, nominal_report
 
 data_dir = Path("data")
 collector = Collector(data_dir)
@@ -63,7 +63,7 @@ print(report["by_currency"])
 
 `Collector.import_local(Path("raport.zip"))` importuje posiadany plik bez internetu.
 `nominal_report(data_dir, run_id=1)` odczytuje wybraną obserwację historyczną.
-`CollectorError` jest dostępny w `kdpw_rze`; błędy sieci i danych wejściowych mogą
+`CollectorError` jest dostępny w `pykdpw`; błędy sieci i danych wejściowych mogą
 również pochodzić ze standardowych modułów Pythona.
 
 ## Źródło i zakres
@@ -110,8 +110,8 @@ aby wymuszać kolejne próby. Program nie stosuje rotacji adresów ani obchodzen
 ## Nominał aktywnych obligacji
 
 ```powershell
-.\.venv\Scripts\python.exe -m kdpw_rze nominal
-.\.venv\Scripts\python.exe -m kdpw_rze nominal --run-id 1
+.\.venv\Scripts\python.exe -m pykdpw nominal
+.\.venv\Scripts\python.exe -m pykdpw nominal --run-id 1
 ```
 
 Raport działa wyłącznie na lokalnej bazie. Domyślnie wybiera ostatnią udaną
@@ -240,8 +240,8 @@ może zwrócić kilka obserwacji.
 ## Błędy i ponowny import
 
 ```powershell
-.\.venv\Scripts\python.exe -m kdpw_rze status
-.\.venv\Scripts\python.exe -m kdpw_rze import .\data\archives\2026-11-17\00000001\source.zip
+.\.venv\Scripts\python.exe -m pykdpw status
+.\.venv\Scripts\python.exe -m pykdpw import .\data\archives\2026-11-17\00000001\source.zip
 ```
 
 Lokalny import działa bez internetu, również przy aktywnym wstrzymaniu pobierania.

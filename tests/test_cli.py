@@ -1,6 +1,6 @@
 import json
 
-from kdpw_rze.cli import main
+from pykdpw.cli import main
 
 
 def test_cli_status_does_not_create_data(tmp_path, capsys):

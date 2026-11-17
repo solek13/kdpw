@@ -10,10 +10,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from kdpw_rze import transport
-from kdpw_rze.collector import Collector, cooldown_until
-from kdpw_rze.common import CollectorError
-from kdpw_rze.locking import exclusive_lock
+from pykdpw import transport
+from pykdpw.collector import Collector, cooldown_until
+from pykdpw.common import CollectorError
+from pykdpw.locking import exclusive_lock
 
 
 @pytest.fixture
@@ -153,8 +153,8 @@ def test_download_size_limit_cleans_temporary_file(tmp_path, clock, server, monk
 
 def test_lock_is_cross_process_and_released(tmp_path):
     script = """from pathlib import Path
-from kdpw_rze.locking import exclusive_lock
-from kdpw_rze.common import CollectorError
+from pykdpw.locking import exclusive_lock
+from pykdpw.common import CollectorError
 import sys
 try:
     with exclusive_lock(Path(sys.argv[1])):

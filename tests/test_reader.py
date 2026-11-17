@@ -4,8 +4,8 @@ import zipfile
 import pytest
 from defusedxml.common import DefusedXmlException
 
-from kdpw_rze.common import CollectorError
-from kdpw_rze.xml_reader import ReportReader, report_date, value
+from pykdpw.common import CollectorError
+from pykdpw.xml_reader import ReportReader, report_date, value
 
 from conftest import document, instrument, issuer, payment
 

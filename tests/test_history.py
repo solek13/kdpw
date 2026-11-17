@@ -6,9 +6,9 @@ from xml.etree.ElementTree import ParseError
 
 import pytest
 
-from kdpw_rze.collector import Collector
-from kdpw_rze.common import CollectorError
-from kdpw_rze.database import Database
+from pykdpw.collector import Collector
+from pykdpw.common import CollectorError
+from pykdpw.database import Database
 
 from conftest import document, instrument, issuer, payment
 

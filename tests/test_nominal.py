@@ -1,8 +1,8 @@
 import pytest
 
-from kdpw_rze.collector import Collector
-from kdpw_rze.common import CollectorError
-from kdpw_rze.nominal import nominal_report
+from pykdpw.collector import Collector
+from pykdpw.common import CollectorError
+from pykdpw.nominal import nominal_report
 
 from conftest import document, instrument, issuer
 

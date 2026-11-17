@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kdpw-rze"
+name = "pykdpw"
 dynamic = ["version"]
 description = "Daily KDPW RZE bond archives and versioned SQLite history"
 readme = "README.md"
@@ -37,14 +37,14 @@ test = ["pytest>=8,<10"]
 release = ["build>=1.2", "twine>=6.1"]
 
 [project.scripts]
-kdpw-rze = "kdpw_rze.cli:main"
+pykdpw = "pykdpw.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["kdpw_rze*"]
+include = ["pykdpw*"]
 namespaces = false
 
 [tool.setuptools.dynamic]
-version = {attr = "kdpw_rze.__version__"}
+version = {attr = "pykdpw.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
