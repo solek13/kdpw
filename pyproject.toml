@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kdpw-rze"
+version = "0.1.0"
+description = "Daily KDPW RZE bond archives and versioned SQLite history"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["defusedxml>=0.7.1,<0.8", "tzdata>=2025.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+kdpw-rze = "kdpw_rze.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["kdpw_rze*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
