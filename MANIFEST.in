@@ -1,0 +1,9 @@
+include LICENSE README.md pyproject.toml
+recursive-include tests *.py
+recursive-include scripts *.py
+recursive-include docs *.md
+prune data
+prune .venv
+prune build
+prune dist
+global-exclude *.py[cod]

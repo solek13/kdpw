@@ -4,20 +4,47 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kdpw-rze"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Daily KDPW RZE bond archives and versioned SQLite history"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "solek13"}]
+keywords = ["kdpw", "rze", "bonds", "obligacje", "sqlite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Office/Business :: Financial",
+]
 dependencies = ["defusedxml>=0.7.1,<0.8", "tzdata>=2025.2"]
+
+[project.urls]
+Homepage = "https://github.com/solek13/kdpw"
+Repository = "https://github.com/solek13/kdpw"
+Documentation = "https://github.com/solek13/kdpw#readme"
+Issues = "https://github.com/solek13/kdpw/issues"
+Changelog = "https://github.com/solek13/kdpw/releases"
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+release = ["build>=1.2", "twine>=6.1"]
 
 [project.scripts]
 kdpw-rze = "kdpw_rze.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["kdpw_rze*"]
+namespaces = false
+
+[tool.setuptools.dynamic]
+version = {attr = "kdpw_rze.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

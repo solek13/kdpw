@@ -1,30 +1,35 @@
 # KDPW RZE — archiwum obligacji
 
-Kolektor pełnego eksportu Rejestru Zobowiązań Emitentów KDPW.
+Niezależna paczka Python do pobierania publicznego eksportu Rejestru Zobowiązań Emitentów KDPW.
 Każde uruchomienie `fetch` próbuje pobrać jeden ZIP z XML-em, zachowuje oryginał
 i importuje obligacje oraz ich świadczenia do lokalnej bazy SQLite.
 Program przeznaczony jest do uruchamiania raz dziennie. Nie instaluje harmonogramu.
 
 ## Instalacja i uruchomienie
 
-Python **3.12 lub nowszy**, Windows lub Linux. W katalogu projektu:
+Python **3.12 lub nowszy**, Windows lub Linux. W aktywnym środowisku Pythona
+zainstaluj gotowe wydanie (bez klonowania repozytorium i bez Git):
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m kdpw_rze fetch
-.\.venv\Scripts\python.exe -m kdpw_rze status
+```shell
+python -m pip install "https://github.com/solek13/kdpw/releases/download/v0.1.0/kdpw_rze-0.1.0-py3-none-any.whl"
+kdpw-rze fetch
+kdpw-rze nominal
+kdpw-rze status
 ```
 
-Na Linuksie odpowiednikiem interpretera jest `.venv/bin/python`.
-Po instalacji dostępne jest również polecenie `kdpw-rze` w środowisku wirtualnym.
+Pliki wydań i kolejne wersje są dostępne w [GitHub Releases](https://github.com/solek13/kdpw/releases).
+Polecenie `python -m kdpw_rze` wykonuje te same operacje co `kdpw-rze`.
+Do pobierania danych nie potrzeba konta KDPW ani klucza API.
 
 Domyślny katalog danych to `./data`, względem bieżącego katalogu procesu.
 Przy regularnym uruchamianiu wskazuj **ten sam bezwzględny katalog**:
 
-```powershell
-.\.venv\Scripts\python.exe -m kdpw_rze fetch --data-dir E:\github\kdpw\data
+```shell
+kdpw-rze fetch --data-dir /pelna/sciezka/do/danych
 ```
+
+Na Windows użyj swojej ścieżki, np. `C:\dane\rze`. Zawsze wskazuj ten sam katalog
+również w poleceniach `status`, `nominal` i `import`.
 
 | Polecenie | Działanie |
 | --- | --- |
@@ -38,6 +43,28 @@ Każde polecenie przyjmuje `--data-dir`. Wynik jest JSON-em na standardowym wyj�
 a komunikaty postępu i błędy trafiają na standardowe wyjście błędów.
 Kody zakończenia: `0` sukces lub wykorzystana już dzienna próba, `1` błąd,
 `2` aktywne wstrzymanie/czas oczekiwania, `130` przerwanie przez użytkownika.
+
+## Użycie z Pythona
+
+```python
+from pathlib import Path
+from kdpw_rze import Collector, nominal_report
+
+data_dir = Path("data")
+collector = Collector(data_dir)
+result = collector.fetch()  # To samo ograniczenie pobierania co w CLI.
+print(result["status"])
+print(collector.status())
+
+# Wyłącznie lokalne obliczenie, gdy w bazie jest już udany import.
+report = nominal_report(data_dir)
+print(report["by_currency"])
+```
+
+`Collector.import_local(Path("raport.zip"))` importuje posiadany plik bez internetu.
+`nominal_report(data_dir, run_id=1)` odczytuje wybraną obserwację historyczną.
+`CollectorError` jest dostępny w `kdpw_rze`; błędy sieci i danych wejściowych mogą
+również pochodzić ze standardowych modułów Pythona.
 
 ## Źródło i zakres
 
@@ -224,11 +251,23 @@ oznacza niedokończoną próbę jako `interrupted`. Nie usuwa to limitu pobieran
 
 ## Testy
 
+Instalacja deweloperska z lokalnej kopii repozytorium:
+
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e '.[test]'
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
+Na Linuksie odpowiednikiem interpretera jest `.venv/bin/python`.
 Testy korzystają z syntetycznych XML-i i lokalnego serwera HTTP. Nie łączą się z KDPW.
 CI sprawdza Windows i Linux na Pythonie 3.12, 3.13 i 3.14.
 Archiwa, SQLite, logi i środowisko wirtualne są wykluczone z Git.
+
+## Licencja i publikacja
+
+Kod i dokumentacja projektu są dostępne na licencji [MIT](https://github.com/solek13/kdpw/blob/main/LICENSE).
+Dane KDPW nie są dołączone do paczki; licencja projektu nie nadaje praw do danych KDPW.
+
+Instrukcja budowania wydań i konfiguracji publikacji na PyPI znajduje się w
+[docs/publishing.md](https://github.com/solek13/kdpw/blob/main/docs/publishing.md).
