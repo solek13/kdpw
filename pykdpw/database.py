@@ -9,10 +9,10 @@ from pathlib import Path
 from .common import CollectorError, canonical_json, content_hash, day, timestamp
 from .xml_reader import ReportReader, currency, report_date, value
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA = """
 CREATE TABLE schema_info (version INTEGER NOT NULL);
-INSERT INTO schema_info VALUES (1);
+INSERT INTO schema_info VALUES (2);
 CREATE TABLE control (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_attempt_at TEXT, last_attempt_day TEXT,
@@ -61,29 +61,50 @@ CREATE TABLE instrument_versions (
     payload_json TEXT NOT NULL
 );
 CREATE INDEX instruments_security_id ON instrument_versions(security_id);
-CREATE TABLE payments (
-    instrument_version_id INTEGER NOT NULL REFERENCES instrument_versions(id),
-    ordinal INTEGER NOT NULL,
+"""
+
+HISTORY_SCHEMA = """
+CREATE TABLE payment_history (
+    security_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+    first_id INTEGER NOT NULL REFERENCES instrument_versions(id),
+    end_id INTEGER REFERENCES instrument_versions(id),
     event_code TEXT, record_date TEXT, payment_date TEXT, interest_rate TEXT,
     expected_amount TEXT, expected_currency TEXT, expected_quantity TEXT,
     settled_date TEXT, settled_amount TEXT, settled_currency TEXT, settled_quantity TEXT,
     updated_date TEXT, timely_update TEXT, payload_json TEXT NOT NULL,
-    PRIMARY KEY (instrument_version_id, ordinal)
+    PRIMARY KEY (security_id, ordinal, first_id)
 ) WITHOUT ROWID;
-CREATE INDEX payments_date ON payments(payment_date);
-CREATE TABLE report_issuers (
-    report_id INTEGER NOT NULL REFERENCES reports(id),
-    ordinal INTEGER NOT NULL,
-    issuer_version_id INTEGER NOT NULL REFERENCES issuer_versions(id),
-    PRIMARY KEY (report_id, ordinal)
+CREATE UNIQUE INDEX current_payments ON payment_history(security_id, ordinal) WHERE end_id IS NULL;
+CREATE INDEX payments_date ON payment_history(payment_date);
+CREATE VIEW payments AS
+SELECT v.id AS instrument_version_id, h.ordinal,
+       h.event_code, h.record_date, h.payment_date, h.interest_rate,
+       h.expected_amount, h.expected_currency, h.expected_quantity, h.settled_date,
+       h.settled_amount, h.settled_currency, h.settled_quantity, h.updated_date,
+       h.timely_update, h.payload_json
+FROM instrument_versions v JOIN payment_history h ON h.security_id = v.security_id
+ AND h.first_id <= v.id AND (h.end_id IS NULL OR v.id < h.end_id);
+
+CREATE TABLE issuer_history (
+    ordinal INTEGER NOT NULL, first_id INTEGER NOT NULL REFERENCES reports(id),
+    end_id INTEGER REFERENCES reports(id), issuer_version_id INTEGER NOT NULL REFERENCES issuer_versions(id),
+    PRIMARY KEY (ordinal, first_id)
 ) WITHOUT ROWID;
-CREATE TABLE report_instruments (
-    report_id INTEGER NOT NULL,
+CREATE UNIQUE INDEX current_issuers ON issuer_history(ordinal) WHERE end_id IS NULL;
+CREATE VIEW report_issuers AS
+SELECT r.id AS report_id, h.ordinal, h.issuer_version_id
+FROM reports r JOIN issuer_history h ON h.first_id <= r.id AND (h.end_id IS NULL OR r.id < h.end_id);
+
+CREATE TABLE instrument_history (
     issuer_ordinal INTEGER NOT NULL, instrument_ordinal INTEGER NOT NULL,
+    first_id INTEGER NOT NULL REFERENCES reports(id), end_id INTEGER REFERENCES reports(id),
     instrument_version_id INTEGER NOT NULL REFERENCES instrument_versions(id),
-    PRIMARY KEY (report_id, issuer_ordinal, instrument_ordinal),
-    FOREIGN KEY (report_id, issuer_ordinal) REFERENCES report_issuers(report_id, ordinal)
+    PRIMARY KEY (issuer_ordinal, instrument_ordinal, first_id)
 ) WITHOUT ROWID;
+CREATE UNIQUE INDEX current_instruments ON instrument_history(issuer_ordinal, instrument_ordinal) WHERE end_id IS NULL;
+CREATE VIEW report_instruments AS
+SELECT r.id AS report_id, h.issuer_ordinal, h.instrument_ordinal, h.instrument_version_id
+FROM reports r JOIN instrument_history h ON h.first_id <= r.id AND (h.end_id IS NULL OR r.id < h.end_id);
 CREATE VIEW daily_bonds AS
 SELECT r.id AS run_id, r.observation_date, r.started_at AS observed_at,
        p.id AS report_id, p.report_date,
@@ -114,9 +135,11 @@ class Database:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
             if not tables:
-                self.connection.executescript("BEGIN;\n" + SCHEMA + "\nCOMMIT;")
+                self.connection.executescript("BEGIN;\n" + SCHEMA + HISTORY_SCHEMA + "\nCOMMIT;")
             version = self.connection.execute("SELECT version FROM schema_info").fetchone()
-            if version is None or version[0] != SCHEMA_VERSION:
+            if version and version[0] == 1:
+                self._migrate_history()
+            elif version is None or version[0] != SCHEMA_VERSION:
                 raise CollectorError("Nieobsługiwana wersja bazy SQLite.")
         except Exception:
             self.connection.close()
@@ -195,6 +218,88 @@ class Database:
         )
         return cursor.lastrowid, True
 
+    def _record_membership(self, report_id: int, issuers: dict, instruments: dict):
+        # Positions identify slots in the published XML, including duplicate securities.
+        for table, positions, version, incoming in (
+            ("issuer_history", ("ordinal",), "issuer_version_id", issuers),
+            ("instrument_history", ("issuer_ordinal", "instrument_ordinal"), "instrument_version_id", instruments),
+        ):
+            columns = ", ".join(positions)
+            current = {tuple(row[:-1]): row[-1] for row in self.connection.execute(
+                f"SELECT {columns}, {version} FROM {table} WHERE end_id IS NULL"
+            )}
+            match = " AND ".join(f"{key} = ?" for key in positions)
+            self.connection.executemany(
+                f"UPDATE {table} SET end_id = ? WHERE {match} AND end_id IS NULL",
+                ((report_id, *key) for key, old in current.items() if incoming.get(key) != old),
+            )
+            placeholders = ", ".join("?" for _ in range(len(positions) + 2))
+            self.connection.executemany(
+                f"INSERT INTO {table} ({columns}, first_id, {version}) VALUES ({placeholders})",
+                ((*key, report_id, new) for key, new in incoming.items() if current.get(key) != new),
+            )
+
+    def _record_payments(self, instrument_id: int, security_id: str, payments: list):
+        current = dict(self.connection.execute(
+            "SELECT ordinal, payload_json FROM payment_history WHERE security_id = ? AND end_id IS NULL",
+            (security_id,),
+        ))
+        for ordinal, p in enumerate(payments, 1):
+            payload = canonical_json(p)
+            old = current.get(ordinal)
+            if old == payload:
+                continue
+            if old is not None:
+                self.connection.execute(
+                    "UPDATE payment_history SET end_id = ? WHERE security_id = ? AND ordinal = ? AND end_id IS NULL",
+                    (instrument_id, security_id, ordinal),
+                )
+            self.connection.execute(
+                "INSERT INTO payment_history VALUES (" + ",".join("?" for _ in range(18)) + ")",
+                (security_id, ordinal, instrument_id, None,
+                 value(p, "EvtCd"), value(p, "RcrdDt"), value(p, "PmtDt"), value(p, "IntrstRate"),
+                 value(p, "ExpctdPmtVal"), currency(p, "ExpctdPmtVal"), value(p, "ExpctQty"),
+                 value(p, "SttldPmtDt"), value(p, "SttldPmtVal"), currency(p, "SttldPmtVal"), value(p, "SttldQty"),
+                 value(p, "UpdtDt"), value(p, "OnTmInd"), payload),
+            )
+        self.connection.execute(
+            "UPDATE payment_history SET end_id = ? WHERE security_id = ? AND ordinal > ? AND end_id IS NULL",
+            (instrument_id, security_id, len(payments)),
+        )
+
+    def _migrate_history(self):
+        # Keep the old tables until all their snapshots have been replayed. The
+        # schema switch and the data conversion commit together under the collector lock.
+        self.connection.executescript("""
+            BEGIN IMMEDIATE;
+            DROP VIEW daily_bonds;
+            DROP INDEX payments_date;
+            ALTER TABLE payments RENAME TO old_payments;
+            ALTER TABLE report_issuers RENAME TO old_issuers;
+            ALTER TABLE report_instruments RENAME TO old_instruments;
+        """ + HISTORY_SCHEMA)
+        for report_id, in self.connection.execute("SELECT id FROM reports ORDER BY id"):
+            issuers = {(slot,): version for slot, version in self.connection.execute(
+                "SELECT ordinal, issuer_version_id FROM old_issuers WHERE report_id = ?", (report_id,),
+            )}
+            instruments = {(issuer, slot): version for issuer, slot, version in self.connection.execute(
+                "SELECT issuer_ordinal, instrument_ordinal, instrument_version_id FROM old_instruments "
+                "WHERE report_id = ?", (report_id,),
+            )}
+            self._record_membership(report_id, issuers, instruments)
+        for instrument_id, security_id in self.connection.execute(
+            "SELECT id, security_id FROM instrument_versions ORDER BY id"
+        ):
+            payments = [json.loads(row[0]) for row in self.connection.execute(
+                "SELECT payload_json FROM old_payments WHERE instrument_version_id = ? ORDER BY ordinal",
+                (instrument_id,),
+            )]
+            self._record_payments(instrument_id, security_id, payments)
+        for table in ("old_payments", "old_instruments", "old_issuers"):
+            self.connection.execute(f"DROP TABLE {table}")
+        self.connection.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
+        self.connection.commit()
+
     def import_report(self, path: Path, zip_sha256: str, run_id: int, now_fn) -> int:
         """Publish all report rows and the successful run in a single transaction."""
         previous = self.connection.execute(
@@ -209,6 +314,8 @@ class Database:
         self.connection.execute("BEGIN")
         try:
             report_id = self.connection.execute("INSERT INTO reports DEFAULT VALUES").lastrowid
+            issuers = {}
+            instruments = {}
             last_issuer_ordinal = None
             for instrument in reader:
                 if instrument.issuer_ordinal != last_issuer_ordinal:
@@ -223,8 +330,7 @@ class Database:
                         "unpaid_amount_pln": value(issuer, "NotPdAmt"),
                         "payload_json": canonical_json(issuer),
                     })
-                    self.connection.execute("INSERT INTO report_issuers VALUES (?, ?, ?)",
-                                            (report_id, instrument.issuer_ordinal, issuer_id))
+                    issuers[(instrument.issuer_ordinal,)] = issuer_id
                     last_issuer_ordinal = instrument.issuer_ordinal
                 data = instrument.data
                 digest = content_hash({"data": data, "payments": instrument.payments})
@@ -247,18 +353,8 @@ class Database:
                     "fixed_rate": value(data, "FixRate"), "payload_json": canonical_json(data),
                 })
                 if new:
-                    self.connection.executemany(
-                        "INSERT INTO payments VALUES (" + ",".join("?" for _ in range(16)) + ")",
-                        ((instrument_id, ordinal,
-                          value(p, "EvtCd"), value(p, "RcrdDt"), value(p, "PmtDt"), value(p, "IntrstRate"),
-                          value(p, "ExpctdPmtVal"), currency(p, "ExpctdPmtVal"), value(p, "ExpctQty"),
-                          value(p, "SttldPmtDt"), value(p, "SttldPmtVal"), currency(p, "SttldPmtVal"),
-                          value(p, "SttldQty"), value(p, "UpdtDt"), value(p, "OnTmInd"), canonical_json(p))
-                         for ordinal, p in enumerate(instrument.payments, 1)),
-                    )
-                self.connection.execute("INSERT INTO report_instruments VALUES (?, ?, ?, ?)",
-                                        (report_id, instrument.issuer_ordinal,
-                                         instrument.instrument_ordinal, instrument_id))
+                    self._record_payments(instrument_id, value(data, "Scty", "SctyId"), instrument.payments)
+                instruments[(instrument.issuer_ordinal, instrument.instrument_ordinal)] = instrument_id
 
             previous = self.connection.execute(
                 "SELECT id FROM reports WHERE xml_sha256 = ?", (reader.xml_sha256,)
@@ -268,6 +364,7 @@ class Database:
                 report_id = previous[0]
                 self.connection.execute("BEGIN")
             else:
+                self._record_membership(report_id, issuers, instruments)
                 created_at = value(reader.header, "CreDtTm", "DtTm")
                 if created_at is None:
                     created_at = value(reader.header, "CreDtTm", "Dt")

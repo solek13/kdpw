@@ -65,6 +65,41 @@ def test_source_occurrences_not_merged_by_security_id(tmp_path, make_zip, clock)
     ]
 
 
+def test_only_changed_positions_are_stored(tmp_path, make_zip, clock):
+    directory = tmp_path / "data"
+    collector = Collector(directory, now_fn=clock)
+    a = instrument()
+    b = issuer(instrument(identifier="B"), name="B")
+    original = make_zip(document(issuer(a) + b))
+    first = collector.import_local(original)
+    for day in range(17, 27):
+        collector.import_local(make_zip(document(issuer(a) + b, report_day=f"2026-11-{day}")))
+
+    def history_sizes():
+        return tuple(query(directory, f"SELECT COUNT(*) FROM {table}")[0][0]
+                     for table in ("issuer_history", "instrument_history", "payment_history"))
+
+    assert history_sizes() == (2, 2, 4)
+    assert query(directory, "SELECT COUNT(*) FROM daily_bonds") == [(22,)]
+    changed = instrument(payments=payment() + payment(amount="777.00"))
+    corrected = collector.import_local(make_zip(document(issuer(changed))))
+    assert history_sizes() == (2, 3, 5)
+    replay = collector.import_local(original)
+    assert replay["report_id"] == first["report_id"]
+    # A previously seen report replayed between new imports must not reset the baseline.
+    restored = collector.import_local(make_zip(document(issuer(changed) + b, report_day="2026-11-28")))
+    assert history_sizes() == (3, 4, 5)
+    for run, expected in ((first, ["SERIA-A", "B"]), (corrected, ["SERIA-A"]),
+                          (replay, ["SERIA-A", "B"]), (restored, ["SERIA-A", "B"])):
+        rows = query(directory, "SELECT security_id FROM daily_bonds WHERE run_id = ? ORDER BY issuer_ordinal",
+                     (run["id"],))
+        assert [row[0] for row in rows] == expected
+    amounts = ("SELECT p.expected_amount FROM daily_bonds b JOIN payments p USING (instrument_version_id) "
+               "WHERE b.run_id = ? AND b.security_id = 'SERIA-A' ORDER BY p.ordinal")
+    assert query(directory, amounts, (first["id"],)) == [("123.4500",), ("123.4500",)]
+    assert query(directory, amounts, (restored["id"],)) == [("123.4500",), ("777.00",)]
+
+
 def test_partial_import_rolls_back_and_archive_can_be_replayed(tmp_path, make_zip, clock, monkeypatch):
     directory = tmp_path / "data"
     collector = Collector(directory, now_fn=clock)

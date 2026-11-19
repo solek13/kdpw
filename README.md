@@ -212,10 +212,18 @@ usuwania historii ani kopii zapasowych — ich wykonanie pozostaje po stronie op
 | `daily_bonds` | Obligacje każdej zakończonej powodzeniem obserwacji |
 | `control` | Trwały limit prób i wstrzymania |
 
-Identyczna wersja instrumentu współdzieli parametry i świadczenia między raportami.
-Zmiana któregokolwiek pola instrumentu lub jego kalendarza tworzy pełną nową wersję
-tego instrumentu. Przetwarzanie raportu jest transakcyjne: błąd cofa cały import,
-a archiwum i zapis błędu pozostają. Powtórzony XML nie duplikuje raportu.
+Pierwszy raport zapisuje pełny skład. Kolejne raporty zapisują zmiany na pozycjach
+źródłowego XML w tabelach `issuer_history` i `instrument_history`. Dodanie lub
+zmiana pozycji otwiera nowy przedział, a usunięcie zamyka poprzedni. Zmiana samej
+daty raportu dodaje tylko metadane. Zmiana kolejności w XML jest zmianą pozycji.
+Tabela `payment_history` przechowuje w ten sam sposób zmiany na poszczególnych
+pozycjach kalendarza kolejnych wersji danej serii. Widoki `daily_bonds` i
+`payments` odtwarzają komplet danych dla wskazanej obserwacji i wersji instrumentu.
+
+Przy pierwszym otwarciu do zapisu program automatycznie przenosi bazę w wersji 1
+do nowego schematu w jednej transakcji. Zachowuje identyfikatory raportów, wersji
+i uruchomień. SQLite może ponownie wykorzystać zwolnione strony przy kolejnych
+importach. Każdy import nadal ma własny wpis w `runs` i archiwum na dysku.
 
 Kwoty, oprocentowanie i identyfikatory są zapisane jako tekst, aby zachować
 dokładność i zera wiodące. Do obliczeń pieniężnych używaj `decimal.Decimal`,
