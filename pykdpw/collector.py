@@ -35,8 +35,9 @@ def cooldown_until(now: datetime, retry_after: str | None) -> str:
 
 
 class Collector:
-    def __init__(self, data_dir: Path, *, now_fn=utc_now, progress=None):
+    def __init__(self, data_dir: Path, *, include_payments: bool = False, now_fn=utc_now, progress=None):
         self.data_dir = data_dir.resolve()
+        self.include_payments = include_payments
         self.now = now_fn
         self.progress = progress or (lambda message: None)
 
@@ -74,10 +75,10 @@ class Collector:
             response_headers_json=canonical_json(metadata.get("response_headers", {})),
         )
         self._manifest(database, run_id)
-        self.progress("Archiwum zapisane. Trwa strumieniowy import obligacji i świadczeń do SQLite.")
+        self.progress("Archiwum zapisane. Trwa import raportu do SQLite.")
         database.update_run(run_id, status="importing")
         self._manifest(database, run_id)
-        database.import_report(path, metadata["zip_sha256"], run_id, self.now)
+        database.import_report(path, metadata["zip_sha256"], run_id, self.now, include_payments=self.include_payments)
         self._manifest(database, run_id)
         return database.run(run_id)
 

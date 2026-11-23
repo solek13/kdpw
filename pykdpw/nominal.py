@@ -5,12 +5,54 @@ import sqlite3
 from collections import Counter, defaultdict
 from contextlib import closing
 from decimal import Decimal, localcontext
+from itertools import groupby
+from operator import itemgetter
 from pathlib import Path
 
 from .common import CollectorError
 
 DECIMAL = re.compile(r"[+]?\d+(?:\.\d+)?\Z", re.ASCII)
 CURRENCY = re.compile(r"[A-Z]{3}\Z", re.ASCII)
+
+ISSUER_NOMINAL_SCHEMA = """
+CREATE TABLE latest_issuer_nominals (
+    run_id INTEGER NOT NULL REFERENCES runs(id),
+    report_date TEXT, issuer_name TEXT NOT NULL, issuer_lei TEXT, issuer_nip TEXT,
+    security_type TEXT NOT NULL, nominal_currency TEXT, nominal_amount TEXT,
+    included_records INTEGER NOT NULL, excluded_records INTEGER NOT NULL
+);
+CREATE VIEW issuer_bond_nominal AS SELECT * FROM latest_issuer_nominals WHERE security_type = 'BOND';
+CREATE VIEW issuer_covered_bond_nominal AS SELECT * FROM latest_issuer_nominals WHERE security_type = 'MRBD';
+"""
+
+
+def refresh_issuer_nominals(db: sqlite3.Connection, run_id: int):
+    """Keep one exact snapshot readable by plain SQLite clients."""
+    rows = db.execute("""
+        SELECT report_date, issuer_name, issuer_lei, issuer_nip, security_type, nominal_amount,
+               COALESCE('lei:' || NULLIF(issuer_lei, ''), 'nip:' || NULLIF(issuer_nip, ''),
+                        'name:' || issuer_name) AS issuer_key,
+               CASE WHEN nominal_currency GLOB '[A-Z][A-Z][A-Z]' THEN nominal_currency END AS currency
+        FROM daily_instruments
+        WHERE run_id = ? AND status = 'ACTV' AND security_type IN ('BOND', 'MRBD')
+        ORDER BY issuer_key, security_type, currency, issuer_ordinal, instrument_ordinal
+    """, (run_id,))
+    db.execute("DELETE FROM latest_issuer_nominals")
+    with localcontext() as context:
+        context.prec = 50
+        for (_, kind, currency), group in groupby(rows, itemgetter("issuer_key", "security_type", "currency")):
+            total = Decimal(0)
+            included = excluded = 0
+            for row in group:
+                amount = row["nominal_amount"]
+                if currency and amount and DECIMAL.fullmatch(amount):
+                    total += Decimal(amount)
+                    included += 1
+                else:
+                    excluded += 1
+            db.execute("INSERT INTO latest_issuer_nominals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (run_id, row["report_date"], row["issuer_name"], row["issuer_lei"], row["issuer_nip"],
+                        kind, currency, format(total, "f") if included else None, included, excluded))
 
 
 def nominal_report(data_dir: Path, run_id: int | None = None) -> dict:

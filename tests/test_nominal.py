@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from pykdpw.collector import Collector
@@ -72,3 +74,34 @@ def test_no_database_is_not_a_zero_total(tmp_path):
     with pytest.raises(CollectorError):
         nominal_report(tmp_path / "absent")
     assert not (tmp_path / "absent").exists()
+
+
+def test_latest_issuer_views_by_type_currency_and_observation(tmp_path, make_zip):
+    collector = Collector(tmp_path)
+    bonds = (instrument(identifier="A") + instrument(identifier="B", status="NACT")
+             + instrument(identifier="USD").replace('Ccy="EUR"', 'Ccy="USD"'))
+    covered = instrument(kind="MRBD").replace("12345678901234.56", "0.00001")
+    bad = covered.replace("0.00001", "bad")
+    ident = "<NIP>0012345678</NIP>"
+    path = make_zip(document(issuer(bonds, identifiers=ident) + issuer(instrument(), identifiers=ident)
+                             + issuer(covered + bad, identifiers=ident) + issuer(covered, name="Bank B")
+                             + issuer(instrument(kind="CRIN"), name="Fundusz")))
+    first = collector.import_local(path)
+    with sqlite3.connect(tmp_path / "rze.sqlite3") as db:
+        sql = "SELECT issuer_name, nominal_currency, nominal_amount, included_records, excluded_records FROM "
+        def totals(view):
+            return db.execute(sql + view + " ORDER BY issuer_name, nominal_currency").fetchall()
+
+        name = "Żółć Spółka Testowa"
+        expected = [(name, "EUR", "24691357802469.12", 2, 0), (name, "USD", "12345678901234.56", 1, 0)]
+        assert totals("issuer_bond_nominal") == expected
+        assert totals("issuer_covered_bond_nominal") == [
+            ("Bank B", "EUR", "0.00001", 1, 0), (name, "EUR", "0.00001", 1, 1)]
+        assert db.execute("SELECT COUNT(*) FROM daily_instruments WHERE security_type='CRIN'").fetchone() == (1,)
+        collector.import_local(make_zip(document(issuer(covered))))
+        assert totals("issuer_bond_nominal") == []
+        assert totals("issuer_covered_bond_nominal") == [(name, "EUR", "0.00001", 1, 0)]
+        replay = collector.import_local(path)
+        assert replay["report_id"] == first["report_id"]
+        assert totals("issuer_bond_nominal") == expected
+        assert db.execute("SELECT DISTINCT run_id FROM issuer_bond_nominal").fetchall() == [(replay["id"],)]

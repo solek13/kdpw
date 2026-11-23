@@ -18,8 +18,8 @@ def test_full_fields_types_duplicates_and_source_hash(make_zip):
     ))
     reader = ReportReader(make_zip(xml))
     records = list(reader)
-    assert len(records) == 1
-    record = records[0]
+    assert [value(record.data, "Scty", "SctyTp") for record in records] == ["MRBD", "CRIN", "BOND"]
+    record = records[2]
     assert record.instrument_ordinal == 3
     assert value(record.issuer, "FullNm") == "Żółć Spółka Testowa"
     assert value(record.issuer, "IssrLEI") is None

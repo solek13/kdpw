@@ -118,6 +118,7 @@ class HashingReader:
 @dataclass
 class ReportReader:
     path: Path
+    include_payments: bool = True
     header: dict = field(default_factory=dict, init=False)
     stats: Statistics = field(default_factory=Statistics, init=False)
     xml_sha256: str | None = field(default=None, init=False)
@@ -210,18 +211,21 @@ class ReportReader:
                     raise CollectorError("Nieznany element kalendarza świadczeń.")
                 self.stats.instruments += 1
                 self.stats.payments += len(payment_nodes)
+                payments = []
+                for payment_node in payment_nodes:
+                    payment = payload(payment_node)
+                    required(payment, "EvtCd")
+                    required(payment, "RcrdDt")
+                    required(payment, "PmtDt")
+                    if self.include_payments:
+                        payments.append(payment)
                 if security_type == "BOND":
-                    payments = [payload(p) for p in payment_nodes]
-                    for payment in payments:
-                        required(payment, "EvtCd")
-                        required(payment, "RcrdDt")
-                        required(payment, "PmtDt")
                     if not issuer_has_bonds:
                         self.stats.bond_issuers += 1
                         issuer_has_bonds = True
                     self.stats.bonds += 1
-                    self.stats.bond_payments += len(payments)
-                    yield Instrument(self.stats.issuers, instrument_ordinal, issuer_data, data, payments)
+                    self.stats.bond_payments += len(payment_nodes)
+                yield Instrument(self.stats.issuers, instrument_ordinal, issuer_data, data, payments)
                 stack[-2].remove(element)
                 element.clear()
             elif name == "IssrDbtRpt":
@@ -232,5 +236,5 @@ class ReportReader:
             elif len(stack) == 3 and name not in {"GnlInf", "IssrDbtRpt"}:
                 raise CollectorError(f"Nieznany blok raportu: {name}")
             stack.pop()
-        if not report_seen or not header_seen or not self.stats.issuers or not self.stats.bonds:
-            raise CollectorError("Niekompletny lub pusty raport obligacji.")
+        if not report_seen or not header_seen or not self.stats.instruments:
+            raise CollectorError("Niekompletny lub pusty raport instrumentów.")

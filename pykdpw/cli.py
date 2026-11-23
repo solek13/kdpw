@@ -23,7 +23,7 @@ def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Archiwum i historia obligacji KDPW RZE.")
+    parser = argparse.ArgumentParser(description="Archiwum i historia instrumentów KDPW RZE.")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--data-dir", type=Path, default=Path("data"), help="Katalog archiwum i SQLite (domyślnie ./data).")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -36,12 +36,16 @@ def main(argv=None) -> int:
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("--data-dir", type=Path, default=argparse.SUPPRESS)
+        if name in {"fetch", "import"}:
+            command.add_argument("--with-payments", action="store_true",
+                                 help="Zapisz w SQLite również szczegóły świadczeń.")
         if name == "import":
             command.add_argument("archive", type=Path)
         elif name == "nominal":
             command.add_argument("--run-id", type=int, help="Wybrana obserwacja; domyślnie ostatnia udana.")
     args = parser.parse_args(argv)
-    collector = Collector(args.data_dir, progress=lambda message: print(message, file=sys.stderr, flush=True))
+    collector = Collector(args.data_dir, include_payments=getattr(args, "with_payments", False),
+                          progress=lambda message: print(message, file=sys.stderr, flush=True))
     try:
         if args.command == "fetch":
             result = collector.fetch()

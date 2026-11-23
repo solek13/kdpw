@@ -1,8 +1,10 @@
-# pykdpw — dane obligacji z KDPW RZE
+# pykdpw — dane instrumentów z KDPW RZE
 
 Niezależna paczka Python do pobierania publicznego eksportu Rejestru Zobowiązań Emitentów KDPW.
 Każde uruchomienie `fetch` próbuje pobrać jeden ZIP z XML-em, zachowuje oryginał
-i importuje obligacje oraz ich świadczenia do lokalnej bazy SQLite.
+i importuje do SQLite obligacje, listy zastawne i certyfikaty inwestycyjne.
+Domyślnie szczegóły świadczeń pozostają w ZIP-ie. Aby zapisać je również
+w bazie, użyj `pykdpw fetch --with-payments` lub `pykdpw import raport.zip --with-payments`.
 Program przeznaczony jest do uruchamiania raz dziennie. Nie instaluje harmonogramu.
 
 ## Instalacja i uruchomienie
@@ -84,6 +86,7 @@ W Pythonie katalog wybierasz przez `data_dir`, np. `Path(r"D:\Dane\KDPW")`
 na Windows lub `Path("/pelna/sciezka/do/danych")` na Linuksie.
 
 `Collector.import_local(Path("raport.zip"))` importuje posiadany plik bez internetu.
+`Collector(data_dir, include_payments=True)` zapisuje w SQLite także szczegóły świadczeń.
 `nominal_report(data_dir, run_id=1)` odczytuje wybraną obserwację historyczną.
 `CollectorError` jest dostępny w `pykdpw`; błędy sieci i danych wejściowych mogą
 również pochodzić ze standardowych modułów Pythona.
@@ -96,18 +99,17 @@ również pochodzić ze standardowych modułów Pythona.
 - [Opis dziennej aktualizacji danych](https://www.kdpw.pl/pl/zobowiazania-emitentow.html).
 - [Dokumentacja komunikatu reda.dbt.001.02](https://www.kdpw.pl/uploads/reda-dbt-001-02.html).
 
-Archiwum zachowuje **cały eksport RZE**. Baza zawiera emitentów mających obligacje
-oraz wszystkie ich instrumenty `SctyTp=BOND` obecne w eksporcie, również nieaktywne.
-Listy zastawne (`MRBD`) i certyfikaty inwestycyjne (`CRIN`) pozostają w archiwum;
-liczebności raportu obejmują je osobno od liczebności obligacji.
+Archiwum zachowuje **cały eksport RZE**. Baza zawiera wszystkich emitentów i wszystkie
+opublikowane instrumenty typu `BOND`, `MRBD` i `CRIN`, również nieaktywne.
+Liczniki `payments` i `bond_payments` podają liczbę świadczeń w XML w obu trybach importu.
 
 Zachowywane są dane emitenta, identyfikatory ISIN lub identyfikatory wewnętrzne,
-CFI/FISN, parametry emisji, terminy, kwoty i waluty, kalendaria, realizacja
-świadczeń oraz szczegóły serii/subskrypcji/ofert, jeżeli występują w źródle.
-Pełny zakres pól każdego rekordu pozostaje również w `payload_json`.
+CFI/FISN, parametry emisji, terminy, kwoty i waluty oraz szczegóły serii/subskrypcji/ofert,
+jeżeli występują w źródle. Kalendaria i realizację świadczeń zapisuje opcja `--with-payments`.
+Pola źródłowe zapisanych rekordów są dostępne w `payload_json`.
 Szczegóły serii są w `instrument_versions.payload_json`, pod kluczem `Srs`.
 
-„Wszystkie” oznacza wszystkie obligacje **opublikowane przez KDPW w tym eksporcie**.
+Zakres bazy odpowiada instrumentom **opublikowanym przez KDPW w tym eksporcie**.
 Nie ma gwarancji, że emitenci zgłosili każdą emisję. Kolektor nie odtwarza dawnych
 stanów rejestru; historia obserwacji zaczyna się od pierwszego uruchomienia.
 
@@ -157,6 +159,26 @@ liczba takich wpisów jest pokazywana oddzielnie. To nie jest wycena rynkowa ani
 pełna statystyka wszystkich obligacji w Polsce. Jedna suma w PLN wymaga
 osobnego wyboru źródła i daty kursów walutowych. Polecenie nie pobiera kursów.
 
+## Nominał według emitenta
+
+Widoki `issuer_bond_nominal` (obligacje) i `issuer_covered_bond_nominal` (listy zastawne)
+pokazują sumę `NmnlVal` aktywnych emisji (`ACTV`) w ostatniej udanej obserwacji.
+Każdy wiersz dotyczy jednego emitenta i jednej waluty. Emitenta identyfikuje LEI,
+w razie jego braku NIP, a przy braku obu identyfikatorów pełna nazwa.
+Suma jest obliczana dziesiętnie i zapisywana jako tekst. `included_records` podaje
+liczbę uwzględnionych pozycji, a `excluded_records` liczbę aktywnych pozycji z brakującą
+lub niepoprawną kwotą albo walutą. Grupa bez poprawnych kwot ma sumę `NULL`.
+
+```sql
+SELECT issuer_name, nominal_currency, nominal_amount, included_records, excluded_records
+FROM issuer_bond_nominal
+ORDER BY issuer_name, nominal_currency;
+
+SELECT issuer_name, nominal_currency, nominal_amount, included_records, excluded_records
+FROM issuer_covered_bond_nominal
+ORDER BY issuer_name, nominal_currency;
+```
+
 ## Archiwum i historia
 
 ```text
@@ -204,12 +226,14 @@ usuwania historii ani kopii zapasowych — ich wykonanie pozostaje po stronie op
 | Tabela/widok | Zawartość |
 | --- | --- |
 | `runs` | Wszystkie próby sieciowe i importy lokalne, statusy, archiwa i przypisanie raportu |
-| `reports` | Niepowtarzające się XML-e według SHA-256, daty i statystyki |
+| `reports` | SHA-256 XML-a, zakres importu, daty i statystyki |
 | `issuer_versions` | Niezmienne wersje danych emitentów |
-| `instrument_versions` | Niezmienne wersje obligacji, hash obejmuje też świadczenia |
-| `payments` | Wszystkie wystąpienia świadczeń danej wersji instrumentu |
+| `instrument_versions` | Wersje instrumentów według zapisanych danych. W trybie domyślnym zmiana samego kalendarza nie tworzy nowej wersji instrumentu |
+| `payments` | Świadczenia wersji instrumentu zapisane z opcją `--with-payments` lub przez wcześniejsze wersje programu |
 | `report_issuers`, `report_instruments` | Skład każdego raportu z pozycjami w źródłowym XML |
 | `daily_bonds` | Obligacje każdej zakończonej powodzeniem obserwacji |
+| `daily_instruments` | Wszystkie zapisane instrumenty każdej udanej obserwacji |
+| `issuer_bond_nominal`, `issuer_covered_bond_nominal` | Nominał aktywnych obligacji i listów zastawnych według emitenta i waluty w ostatniej udanej obserwacji |
 | `control` | Trwały limit prób i wstrzymania |
 
 Pierwszy raport zapisuje pełny skład. Kolejne raporty zapisują zmiany na pozycjach
@@ -217,13 +241,12 @@ Pierwszy raport zapisuje pełny skład. Kolejne raporty zapisują zmiany na pozy
 zmiana pozycji otwiera nowy przedział, a usunięcie zamyka poprzedni. Zmiana samej
 daty raportu dodaje tylko metadane. Zmiana kolejności w XML jest zmianą pozycji.
 Tabela `payment_history` przechowuje w ten sam sposób zmiany na poszczególnych
-pozycjach kalendarza kolejnych wersji danej serii. Widoki `daily_bonds` i
-`payments` odtwarzają komplet danych dla wskazanej obserwacji i wersji instrumentu.
+pozycjach zapisanych kalendarzy kolejnych wersji danej serii.
 
-Przy pierwszym otwarciu do zapisu program automatycznie przenosi bazę w wersji 1
-do nowego schematu w jednej transakcji. Zachowuje identyfikatory raportów, wersji
-i uruchomień. SQLite może ponownie wykorzystać zwolnione strony przy kolejnych
-importach. Każdy import nadal ma własny wpis w `runs` i archiwum na dysku.
+Przy pierwszym otwarciu do zapisu program aktualizuje starszą bazę i zachowuje
+dotychczasowe obserwacje oraz świadczenia. Aby uwzględnić listy zastawne i certyfikaty
+ze starszego raportu, zaimportuj ponownie jego `source.zip`. Każdy import ma własny
+wpis w `runs`. Ten sam XML w innym zakresie importu otrzymuje osobny `report_id`.
 
 Kwoty, oprocentowanie i identyfikatory są zapisane jako tekst, aby zachować
 dokładność i zera wiodące. Do obliczeń pieniężnych używaj `decimal.Decimal`,
@@ -255,7 +278,7 @@ SELECT issuer_name, issuer_lei, security_id, status,
 FROM daily_bonds
 WHERE run_id = (SELECT MAX(id) FROM runs WHERE status = 'complete');
 
--- Wszystkie świadczenia jednej obligacji z określonej obserwacji.
+-- Świadczenia jednej obligacji z obserwacji obejmującej kalendarz.
 SELECT b.issuer_name, b.security_id, p.*
 FROM daily_bonds b
 JOIN payments p ON p.instrument_version_id = b.instrument_version_id

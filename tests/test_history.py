@@ -20,7 +20,7 @@ def query(directory, sql, args=()):
 
 def test_daily_snapshot_versions_and_payment_changes(tmp_path, make_zip, clock):
     directory = tmp_path / "data"
-    collector = Collector(directory, now_fn=clock)
+    collector = Collector(directory, now_fn=clock, include_payments=True)
     original = make_zip()
     first = collector.import_local(original)
     clock.instant += timedelta(days=1)
@@ -65,9 +65,25 @@ def test_source_occurrences_not_merged_by_security_id(tmp_path, make_zip, clock)
     ]
 
 
-def test_only_changed_positions_are_stored(tmp_path, make_zip, clock):
+def test_default_import_ignores_calendar_changes_and_isolated_from_full_history(tmp_path, make_zip, clock):
     directory = tmp_path / "data"
     collector = Collector(directory, now_fn=clock)
+    full = Collector(directory, now_fn=clock, include_payments=True)
+    first = full.import_local(make_zip())
+    compact = collector.import_local(make_zip(compression=zipfile.ZIP_STORED))
+    changed = make_zip(document(issuer(instrument(payments=payment(amount="77.00")))))
+    collector.import_local(changed)
+    assert query(directory, "SELECT COUNT(*) FROM instrument_versions") == [(2,)]
+    assert query(directory, "SELECT COUNT(*) FROM payment_history") == [(2,)]
+    stored = "SELECT expected_amount FROM daily_instruments JOIN payments USING (instrument_version_id) WHERE run_id=?"
+    assert query(directory, stored, (compact["id"],)) == []
+    assert query(directory, stored, (first["id"],)) == [("123.4500",)] * 2
+    assert query(directory, stored, (full.import_local(changed)["id"],)) == [("77.00",)]
+
+
+def test_only_changed_positions_are_stored(tmp_path, make_zip, clock):
+    directory = tmp_path / "data"
+    collector = Collector(directory, now_fn=clock, include_payments=True)
     a = instrument()
     b = issuer(instrument(identifier="B"), name="B")
     original = make_zip(document(issuer(a) + b))

@@ -7,27 +7,34 @@ from datetime import datetime
 from pathlib import Path
 
 from .common import CollectorError, canonical_json, content_hash, day, timestamp
+from .nominal import ISSUER_NOMINAL_SCHEMA, refresh_issuer_nominals
 from .xml_reader import ReportReader, currency, report_date, value
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+REPORTS_SCHEMA = """
+CREATE TABLE reports (
+    id INTEGER PRIMARY KEY,
+    xml_sha256 TEXT,
+    report_date TEXT, created_at_source TEXT,
+    header_json TEXT NOT NULL DEFAULT '{}',
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    xml_bytes INTEGER,
+    payments_included INTEGER NOT NULL CHECK (payments_included IN (0, 1)),
+    all_instruments INTEGER NOT NULL DEFAULT 1 CHECK (all_instruments IN (0, 1)),
+    UNIQUE (xml_sha256, payments_included, all_instruments)
+);
+CREATE INDEX reports_date ON reports(report_date);
+"""
 SCHEMA = """
 CREATE TABLE schema_info (version INTEGER NOT NULL);
-INSERT INTO schema_info VALUES (2);
+INSERT INTO schema_info VALUES (3);
 CREATE TABLE control (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_attempt_at TEXT, last_attempt_day TEXT,
     paused_reason TEXT, blocked_until TEXT
 );
 INSERT INTO control (id) VALUES (1);
-CREATE TABLE reports (
-    id INTEGER PRIMARY KEY,
-    xml_sha256 TEXT UNIQUE,
-    report_date TEXT, created_at_source TEXT,
-    header_json TEXT NOT NULL DEFAULT '{}',
-    counts_json TEXT NOT NULL DEFAULT '{}',
-    xml_bytes INTEGER
-);
-CREATE INDEX reports_date ON reports(report_date);
+""" + REPORTS_SCHEMA + """
 CREATE TABLE runs (
     id INTEGER PRIMARY KEY,
     started_at TEXT NOT NULL, observation_date TEXT NOT NULL,
@@ -105,7 +112,10 @@ CREATE UNIQUE INDEX current_instruments ON instrument_history(issuer_ordinal, in
 CREATE VIEW report_instruments AS
 SELECT r.id AS report_id, h.issuer_ordinal, h.instrument_ordinal, h.instrument_version_id
 FROM reports r JOIN instrument_history h ON h.first_id <= r.id AND (h.end_id IS NULL OR r.id < h.end_id);
-CREATE VIEW daily_bonds AS
+"""
+
+DAILY_VIEWS = """
+CREATE VIEW daily_instruments AS
 SELECT r.id AS run_id, r.observation_date, r.started_at AS observed_at,
        p.id AS report_id, p.report_date,
        ri.issuer_ordinal, ri.instrument_ordinal,
@@ -119,6 +129,7 @@ JOIN report_issuers ir ON ir.report_id = ri.report_id AND ir.ordinal = ri.issuer
 JOIN issuer_versions i ON i.id = ir.issuer_version_id
 JOIN instrument_versions v ON v.id = ri.instrument_version_id
 WHERE r.status = 'complete';
+CREATE VIEW daily_bonds AS SELECT * FROM daily_instruments WHERE security_type = 'BOND';
 """
 
 
@@ -135,10 +146,13 @@ class Database:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
             if not tables:
-                self.connection.executescript("BEGIN;\n" + SCHEMA + HISTORY_SCHEMA + "\nCOMMIT;")
+                self.connection.executescript("BEGIN;\n" + SCHEMA + HISTORY_SCHEMA + DAILY_VIEWS
+                                              + ISSUER_NOMINAL_SCHEMA + "\nCOMMIT;")
             version = self.connection.execute("SELECT version FROM schema_info").fetchone()
             if version and version[0] == 1:
                 self._migrate_history()
+            if version and version[0] in (1, 2):
+                self._migrate_reports()
             elif version is None or version[0] != SCHEMA_VERSION:
                 raise CollectorError("Nieobsługiwana wersja bazy SQLite.")
         except Exception:
@@ -240,6 +254,13 @@ class Database:
             )
 
     def _record_payments(self, instrument_id: int, security_id: str, payments: list):
+        # End any omitted slots before publishing a shorter or calendar-free version.
+        self.connection.execute(
+            "UPDATE payment_history SET end_id = ? WHERE security_id = ? AND ordinal > ? AND end_id IS NULL",
+            (instrument_id, security_id, len(payments)),
+        )
+        if not payments:
+            return
         current = dict(self.connection.execute(
             "SELECT ordinal, payload_json FROM payment_history WHERE security_id = ? AND end_id IS NULL",
             (security_id,),
@@ -262,10 +283,6 @@ class Database:
                  value(p, "SttldPmtDt"), value(p, "SttldPmtVal"), currency(p, "SttldPmtVal"), value(p, "SttldQty"),
                  value(p, "UpdtDt"), value(p, "OnTmInd"), payload),
             )
-        self.connection.execute(
-            "UPDATE payment_history SET end_id = ? WHERE security_id = ? AND ordinal > ? AND end_id IS NULL",
-            (instrument_id, security_id, len(payments)),
-        )
 
     def _migrate_history(self):
         # Keep the old tables until all their snapshots have been replayed. The
@@ -277,7 +294,7 @@ class Database:
             ALTER TABLE payments RENAME TO old_payments;
             ALTER TABLE report_issuers RENAME TO old_issuers;
             ALTER TABLE report_instruments RENAME TO old_instruments;
-        """ + HISTORY_SCHEMA)
+        """ + HISTORY_SCHEMA + DAILY_VIEWS)
         for report_id, in self.connection.execute("SELECT id FROM reports ORDER BY id"):
             issuers = {(slot,): version for slot, version in self.connection.execute(
                 "SELECT ordinal, issuer_version_id FROM old_issuers WHERE report_id = ?", (report_id,),
@@ -297,23 +314,58 @@ class Database:
             self._record_payments(instrument_id, security_id, payments)
         for table in ("old_payments", "old_instruments", "old_issuers"):
             self.connection.execute(f"DROP TABLE {table}")
-        self.connection.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
+        self.connection.execute("UPDATE schema_info SET version = 2")
         self.connection.commit()
 
-    def import_report(self, path: Path, zip_sha256: str, run_id: int, now_fn) -> int:
+    def _migrate_reports(self):
+        # Keep report IDs and their references while replacing the old unique key.
+        self.connection.executescript("""
+            PRAGMA foreign_keys = OFF;
+            BEGIN IMMEDIATE;
+            DROP VIEW daily_bonds;
+            DROP VIEW IF EXISTS daily_instruments;
+            CREATE TEMP TABLE old_reports AS SELECT * FROM reports;
+            DROP TABLE reports;
+        """ + REPORTS_SCHEMA + DAILY_VIEWS + ISSUER_NOMINAL_SCHEMA + """
+            INSERT INTO reports (id, xml_sha256, report_date, created_at_source, header_json,
+                                 counts_json, xml_bytes, payments_included, all_instruments)
+            SELECT id, xml_sha256, report_date, created_at_source, header_json,
+                   counts_json, xml_bytes, 1, 0 FROM old_reports;
+            DROP TABLE old_reports;
+            UPDATE schema_info SET version = 3;
+        """)
+        latest = self.connection.execute("SELECT MAX(id) FROM runs WHERE status = 'complete'").fetchone()[0]
+        if latest is not None:
+            refresh_issuer_nominals(self.connection, latest)
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = ON")
+
+    def _complete_import(self, run_id: int, report_id: int, now: datetime):
+        self.connection.execute(
+            "UPDATE runs SET status = 'complete', report_id = ?, finished_at = ?, error = NULL WHERE id = ?",
+            (report_id, timestamp(now), run_id),
+        )
+        refresh_issuer_nominals(self.connection, run_id)
+
+    def import_report(self, path: Path, zip_sha256: str, run_id: int, now_fn, *, include_payments=False) -> int:
         """Publish all report rows and the successful run in a single transaction."""
         previous = self.connection.execute(
-            "SELECT report_id FROM runs WHERE zip_sha256 = ? AND status = 'complete' LIMIT 1",
-            (zip_sha256,),
+            "SELECT r.report_id FROM runs r JOIN reports p ON p.id = r.report_id "
+            "WHERE r.zip_sha256 = ? AND r.status = 'complete' AND p.payments_included = ? "
+            "AND p.all_instruments = 1 LIMIT 1",
+            (zip_sha256, include_payments),
         ).fetchone()
         if previous:
-            self.update_run(run_id, status="complete", report_id=previous[0], finished_at=timestamp(now_fn()))
+            with self.connection:
+                self._complete_import(run_id, previous[0], now_fn())
             return previous[0]
 
-        reader = ReportReader(path)
+        reader = ReportReader(path, include_payments=include_payments)
         self.connection.execute("BEGIN")
         try:
-            report_id = self.connection.execute("INSERT INTO reports DEFAULT VALUES").lastrowid
+            report_id = self.connection.execute(
+                "INSERT INTO reports (payments_included) VALUES (?)", (include_payments,)
+            ).lastrowid
             issuers = {}
             instruments = {}
             last_issuer_ordinal = None
@@ -357,7 +409,8 @@ class Database:
                 instruments[(instrument.issuer_ordinal, instrument.instrument_ordinal)] = instrument_id
 
             previous = self.connection.execute(
-                "SELECT id FROM reports WHERE xml_sha256 = ?", (reader.xml_sha256,)
+                "SELECT id FROM reports WHERE xml_sha256 = ? AND payments_included = ? AND all_instruments = 1",
+                (reader.xml_sha256, include_payments),
             ).fetchone()
             if previous:
                 self.connection.rollback()
@@ -374,10 +427,7 @@ class Database:
                     (reader.xml_sha256, report_date(reader.header), created_at,
                      canonical_json(reader.header), canonical_json(asdict(reader.stats)), reader.xml_bytes, report_id),
                 )
-            self.connection.execute(
-                "UPDATE runs SET status = 'complete', report_id = ?, finished_at = ?, error = NULL WHERE id = ?",
-                (report_id, timestamp(now_fn()), run_id),
-            )
+            self._complete_import(run_id, report_id, now_fn())
             self.connection.commit()
             return report_id
         except BaseException:
